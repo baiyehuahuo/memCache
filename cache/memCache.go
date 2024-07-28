@@ -1,7 +1,6 @@
 package cache
 
 import (
-	"fmt"
 	"memCache/define"
 	"memCache/util"
 	"sync"
@@ -12,7 +11,7 @@ var _ Cache = (*memCache)(nil)
 
 type memCache struct {
 	// 线程锁
-	mutex sync.RWMutex
+	mutex sync.Mutex
 
 	// 最大内存
 	maxMemorySize int64
@@ -25,37 +24,32 @@ type memCache struct {
 
 	// 缓存键值对的映射表
 	values map[string]*memCacheValue
-}
 
-type memCacheValue struct {
-	// 实际值
-	value any
-	// 过期时间，绝对时间
-	expireTime time.Time
-	// value 大小
-	size int64
+	// 自动触发清理过期函数的时间间隔
+	clearExpiredTimeInterval time.Duration
 }
 
 func NewMemCache() Cache {
-	return &memCache{
-		maxMemorySize:     define.DefaultMemSize,
-		maxMemorySizeStr:  define.DefaultMemSizeStr,
-		currentMemorySize: 0,
-		values:            make(map[string]*memCacheValue),
+	mc := &memCache{
+		maxMemorySize:            define.DefaultMemSize,
+		maxMemorySizeStr:         define.DefaultMemSizeStr,
+		currentMemorySize:        0,
+		values:                   make(map[string]*memCacheValue),
+		clearExpiredTimeInterval: time.Second,
 	}
+
+	go mc.autoCleanExpiredItems()
+
+	return mc
 }
 
-func (mc *memCache) SetMaxMemory(size string) bool {
-	fmt.Println("setMaxMemory", size)
-	mc.maxMemorySize, mc.maxMemorySizeStr = util.ParseSize(size)
-	return false
-}
-
+// 添加键值对 外部上锁后再使用
 func (mc *memCache) set(key string, val *memCacheValue) {
 	mc.values[key] = val
 	mc.currentMemorySize += val.size
 }
 
+// 删除键值对 外部上锁后再使用
 func (mc *memCache) del(key string) {
 	val, exists := mc.values[key]
 	if !exists {
@@ -65,11 +59,36 @@ func (mc *memCache) del(key string) {
 	delete(mc.values, key)
 }
 
-func (mc *memCache) Set(key string, val any, expiration time.Duration) bool {
+// 清理过期键值对，外部上锁后再使用
+func (mc *memCache) cleanExpiredItems() {
+	for key, val := range mc.values {
+		if val.isExpired() {
+			mc.del(key)
+		}
+	}
+}
+
+// 定时启动清理的线程函数
+func (mc *memCache) autoCleanExpiredItems() {
+	ticker := time.NewTicker(mc.clearExpiredTimeInterval)
+	for {
+		select {
+		case <-ticker.C:
+			mc.mutex.Lock()
+			mc.cleanExpiredItems()
+			mc.mutex.Unlock()
+		}
+	}
+}
+
+func (mc *memCache) SetMaxMemory(size string) bool {
+	mc.maxMemorySize, mc.maxMemorySizeStr = util.ParseSize(size)
+	return false
+}
+
+func (mc *memCache) Set(key string, val any, expire time.Duration) bool {
 	mc.mutex.Lock()
 	defer mc.mutex.Unlock()
-
-	fmt.Println("set", key, val, expiration)
 
 	var previousSize int64
 	if v, ok := mc.values[key]; ok {
@@ -82,27 +101,28 @@ func (mc *memCache) Set(key string, val any, expiration time.Duration) bool {
 	}
 
 	mcv := &memCacheValue{
-		value:      val,
-		expireTime: time.Now().Add(expiration),
-		size:       size,
+		value: val,
+		size:  size,
 	}
+	if expire != 0 {
+		mcv.expireTime = time.Now().Add(expire)
+	}
+
 	mc.values[key] = mcv
 	mc.currentMemorySize += size - previousSize
 	return true
 }
 
 func (mc *memCache) Get(key string) (val any, exists bool) {
-	mc.mutex.RLock()
-	defer mc.mutex.RUnlock()
-
-	fmt.Println("get", key)
+	mc.mutex.Lock()
+	defer mc.mutex.Unlock()
 
 	mcv, exists := mc.values[key]
 	if !exists {
 		return nil, false
 	}
 
-	if mcv.expireTime.Before(time.Now()) {
+	if mcv.isExpired() {
 		mc.del(key)
 		return nil, false
 	}
@@ -114,23 +134,19 @@ func (mc *memCache) Del(key string) {
 	mc.mutex.Lock()
 	defer mc.mutex.Unlock()
 
-	fmt.Println("del", key)
-
 	mc.del(key)
 }
 
 func (mc *memCache) Exists(key string) bool {
-	mc.mutex.RLock()
-	defer mc.mutex.RUnlock()
-
-	fmt.Println("exists", key)
+	mc.mutex.Lock()
+	defer mc.mutex.Unlock()
 
 	mcv, exists := mc.values[key]
 	if !exists {
 		return false
 	}
 
-	if mcv.expireTime.Before(time.Now()) {
+	if mcv.isExpired() {
 		mc.del(key)
 		return false
 	}
@@ -142,26 +158,15 @@ func (mc *memCache) Flush() {
 	mc.mutex.Lock()
 	defer mc.mutex.Unlock()
 
-	fmt.Println("flush")
-
 	mc.currentMemorySize = 0
 	mc.values = make(map[string]*memCacheValue)
 }
 
 func (mc *memCache) Keys() int64 {
-	mc.mutex.RLock()
-	defer mc.mutex.RUnlock()
+	mc.mutex.Lock()
+	defer mc.mutex.Unlock()
 
-	fmt.Println("keys")
+	mc.cleanExpiredItems()
 
-	var counter int64
-	for key, val := range mc.values {
-		if val.expireTime.Before(time.Now()) {
-			mc.del(key)
-			continue
-		}
-		counter++
-	}
-
-	return counter
+	return int64(len(mc.values))
 }
