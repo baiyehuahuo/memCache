@@ -12,11 +12,11 @@ type Cache interface {
 	// Get 根据key获取value
 	Get(key string) (val any, exists bool)
 	// Del 删除key值
-	Del(key string) bool
+	Del(key string)
 	// Exists 判断key是否存在于缓存中
 	Exists(key string) bool
 	// Flush 清空缓存
-	Flush() bool
+	Flush()
 	// Keys 获取缓存中key的数量
 	Keys() int64
 }
