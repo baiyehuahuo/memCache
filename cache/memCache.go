@@ -2,12 +2,21 @@ package cache
 
 import (
 	"fmt"
+	"memCache/util"
 	"time"
 )
 
 var _ Cache = (*memCache)(nil)
 
 type memCache struct {
+	// 最大内存
+	maxMemorySize int64
+
+	// 最大内存的字符串表示
+	maxMemorySizeStr string
+
+	// 当前已使用内存
+	currentMemorySize int64
 }
 
 func NewMemCache() Cache {
@@ -15,7 +24,8 @@ func NewMemCache() Cache {
 }
 
 func (m *memCache) SetMaxMemory(size string) bool {
-	fmt.Println("setMaxMemory")
+	fmt.Println("setMaxMemory", size)
+	m.maxMemorySize, m.maxMemorySizeStr = util.ParseSize(size)
 	return false
 }
 
