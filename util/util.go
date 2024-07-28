@@ -66,3 +66,8 @@ func ParseSize(size string) (parseByteSize int64, parseByteSizeStr string) {
 	}
 	return
 }
+
+func GetValueSize(val any) int64 {
+	// todo
+	return 0
+}
