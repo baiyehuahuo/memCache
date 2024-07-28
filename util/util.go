@@ -1,6 +1,7 @@
 package util
 
 import (
+	"encoding/json"
 	"log"
 	"memCache/define"
 	"strconv"
@@ -68,6 +69,9 @@ func ParseSize(size string) (parseByteSize int64, parseByteSizeStr string) {
 }
 
 func GetValueSize(val any) int64 {
-	// todo
-	return 0
+	// todo make it better
+	bytes, _ := json.Marshal(val)
+	size := int64(len(bytes))
+	log.Println("GetValueSize", val, size)
+	return size
 }
